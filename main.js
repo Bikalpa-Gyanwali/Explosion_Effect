@@ -1,7 +1,45 @@
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.158/build/three.module.js';
 
-let scene, camera, renderer, mesh;
-let originalPositions, directions;
+const vertexShader = `
+  attribute vec3 aDirection;
+  attribute float aStrength;
+
+  uniform float uProgress;
+
+  varying vec3 vNormal;
+  varying float vProgress;
+
+  void main() {
+    vec3 displacedPosition = position + aDirection * (uProgress * aStrength * 2.0);
+
+    vNormal = normalize(normalMatrix * normal);
+    vProgress = uProgress;
+
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(displacedPosition, 1.0);
+  }
+`;
+
+const fragmentShader = `
+  uniform vec3 uBaseColor;
+
+  varying vec3 vNormal;
+  varying float vProgress;
+
+  void main() {
+    vec3 lightDirection = normalize(vec3(0.4, 0.9, 0.6));
+    float light = 0.35 + max(dot(normalize(vNormal), lightDirection), 0.0) * 0.65;
+    vec3 color = uBaseColor * light;
+    float alpha = 1.0 - vProgress * 0.45;
+
+    gl_FragColor = vec4(color, alpha);
+  }
+`;
+
+let scene;
+let camera;
+let renderer;
+let mesh;
+let material;
 let progress = 0;
 let targetProgress = 0;
 
@@ -16,95 +54,91 @@ function init() {
   camera.position.z = 5;
 
   renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
   document.body.appendChild(renderer.domElement);
 
-  let geometry = new THREE.IcosahedronGeometry(1, 2);
-  geometry = geometry.toNonIndexed();
+  const geometry = new THREE.IcosahedronGeometry(1, 2).toNonIndexed();
+  addExplosionAttributes(geometry);
 
-  // ✅ 4. Transparent material for depth fade
-  const material = new THREE.MeshStandardMaterial({
-    color: 0xff3b3b,
-    flatShading: true,
+  material = new THREE.ShaderMaterial({
+    uniforms: {
+      uProgress: { value: 0 },
+      uBaseColor: { value: new THREE.Color(0xff5533) }
+    },
+    vertexShader,
+    fragmentShader,
     transparent: true,
-    opacity: 1
+    flatShading: true,
+    side: THREE.DoubleSide
   });
 
   mesh = new THREE.Mesh(geometry, material);
   scene.add(mesh);
-
-  // ✅ 5. Directional + ambient light
-  const light = new THREE.DirectionalLight(0xffffff, 1);
-  light.position.set(2, 2, 5);
-  scene.add(light);
-
-  const ambient = new THREE.AmbientLight(0xffffff, 0.4);
-  scene.add(ambient);
-
-  const positions = geometry.attributes.position.array;
-  originalPositions = positions.slice();
-
-  directions = [];
-
-  // ✅ 1 + 2. Radial direction from face centroid + per-face strength
-  for (let i = 0; i < positions.length; i += 9) {
-    const cx = (positions[i]   + positions[i+3] + positions[i+6]) / 3;
-    const cy = (positions[i+1] + positions[i+4] + positions[i+7]) / 3;
-    const cz = (positions[i+2] + positions[i+5] + positions[i+8]) / 3;
-
-    const dir = new THREE.Vector3(cx, cy, cz).normalize();
-    const strength = Math.random() * 1.5 + 0.5;
-
-    // Same dir + strength for all 3 vertices of the face
-    directions.push({ dir, strength });
-    directions.push({ dir, strength });
-    directions.push({ dir, strength });
-  }
 
   window.addEventListener('scroll', updateScrollProgress, { passive: true });
   window.addEventListener('resize', onWindowResize);
   updateScrollProgress();
 }
 
+function addExplosionAttributes(geometry) {
+  const positions = geometry.attributes.position.array;
+  const count = geometry.attributes.position.count;
+
+  const directions = new Float32Array(count * 3);
+  const strengths = new Float32Array(count);
+
+  for (let i = 0; i < count; i += 3) {
+    const baseIndex = i * 3;
+
+    const cx = (positions[baseIndex] + positions[baseIndex + 3] + positions[baseIndex + 6]) / 3;
+    const cy = (positions[baseIndex + 1] + positions[baseIndex + 4] + positions[baseIndex + 7]) / 3;
+    const cz = (positions[baseIndex + 2] + positions[baseIndex + 5] + positions[baseIndex + 8]) / 3;
+
+    const direction = new THREE.Vector3(cx, cy, cz).normalize();
+    const strength = Math.random() * 1.5 + 0.5;
+
+    for (let j = 0; j < 3; j++) {
+      const vertexIndex = i + j;
+      const directionIndex = vertexIndex * 3;
+
+      directions[directionIndex] = direction.x;
+      directions[directionIndex + 1] = direction.y;
+      directions[directionIndex + 2] = direction.z;
+      strengths[vertexIndex] = strength;
+    }
+  }
+
+  geometry.setAttribute('aDirection', new THREE.BufferAttribute(directions, 3));
+  geometry.setAttribute('aStrength', new THREE.BufferAttribute(strengths, 1));
+}
+
 function animate() {
   requestAnimationFrame(animate);
 
-  const positions = mesh.geometry.attributes.position.array;
-
   progress += (targetProgress - progress) * 0.08;
+  material.uniforms.uProgress.value = progress;
 
-  for (let i = 0, vi = 0; i < positions.length; i += 3, vi++) {
-    const { dir, strength } = directions[vi];
-
-    const explode = progress * strength * 2;
-
-    // ✅ 3. Wobble offset for rotation illusion
-    const wobbleX = Math.sin(progress * 5 + i * 0.3) * 0.015 * progress;
-    const wobbleY = Math.cos(progress * 5 + i * 0.3) * 0.015 * progress;
-
-    positions[i]     = originalPositions[i]     + dir.x * explode + wobbleX;
-    positions[i + 1] = originalPositions[i + 1] + dir.y * explode + wobbleY;
-    positions[i + 2] = originalPositions[i + 2] + dir.z * explode;
-  }
-
-  mesh.geometry.attributes.position.needsUpdate = true;
   mesh.rotation.y += 0.005;
-
-  // ✅ 4. Fade out as it explodes
-  mesh.material.opacity = 1 - progress * 0.65;
 
   renderer.render(scene, camera);
 }
 
 function updateScrollProgress() {
   const scrollRange = document.documentElement.scrollHeight - window.innerHeight;
-  if (scrollRange <= 0) { targetProgress = 0; return; }
+
+  if (scrollRange <= 0) {
+    targetProgress = 0;
+    return;
+  }
+
   targetProgress = THREE.MathUtils.clamp(window.scrollY / scrollRange, 0, 1);
 }
 
 function onWindowResize() {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
   updateScrollProgress();
 }
