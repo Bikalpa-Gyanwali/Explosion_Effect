@@ -38,10 +38,10 @@ const fragmentShader = `
 let scene;
 let camera;
 let renderer;
-let mesh;
-let material;
 let progress = 0;
 let targetProgress = 0;
+
+const balls = [];
 
 init();
 animate();
@@ -51,20 +51,31 @@ function init() {
   scene.background = new THREE.Color(0x0f172a);
 
   camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 100);
-  camera.position.z = 5;
+  camera.position.z = 5.8;
 
   renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
   document.body.appendChild(renderer.domElement);
 
+  createBall({ color: 0xff5533, rotationSpeed: 0.0055, xDirection: -1 });
+  createBall({ color: 0xff8a3d, rotationSpeed: -0.0045, xDirection: 1 });
+
+  layoutBalls();
+
+  window.addEventListener('scroll', updateScrollProgress, { passive: true });
+  window.addEventListener('resize', onWindowResize);
+  updateScrollProgress();
+}
+
+function createBall({ color, rotationSpeed, xDirection }) {
   const geometry = new THREE.IcosahedronGeometry(1, 2).toNonIndexed();
   addExplosionAttributes(geometry);
 
-  material = new THREE.ShaderMaterial({
+  const material = new THREE.ShaderMaterial({
     uniforms: {
       uProgress: { value: 0 },
-      uBaseColor: { value: new THREE.Color(0xff5533) }
+      uBaseColor: { value: new THREE.Color(color) }
     },
     vertexShader,
     fragmentShader,
@@ -73,12 +84,10 @@ function init() {
     side: THREE.DoubleSide
   });
 
-  mesh = new THREE.Mesh(geometry, material);
+  const mesh = new THREE.Mesh(geometry, material);
   scene.add(mesh);
 
-  window.addEventListener('scroll', updateScrollProgress, { passive: true });
-  window.addEventListener('resize', onWindowResize);
-  updateScrollProgress();
+  balls.push({ mesh, material, rotationSpeed, xDirection });
 }
 
 function addExplosionAttributes(geometry) {
@@ -117,11 +126,25 @@ function animate() {
   requestAnimationFrame(animate);
 
   progress += (targetProgress - progress) * 0.08;
-  material.uniforms.uProgress.value = progress;
 
-  mesh.rotation.y += 0.005;
+  for (const ball of balls) {
+    ball.material.uniforms.uProgress.value = progress;
+    ball.mesh.rotation.y += ball.rotationSpeed;
+    ball.mesh.rotation.x += ball.rotationSpeed * 0.3;
+  }
 
   renderer.render(scene, camera);
+}
+
+function layoutBalls() {
+  const isCompact = window.innerWidth < 700;
+  const spacing = isCompact ? 1.35 : 1.85;
+  const scale = isCompact ? 0.82 : 1;
+
+  for (const ball of balls) {
+    ball.mesh.position.x = ball.xDirection * spacing;
+    ball.mesh.scale.setScalar(scale);
+  }
 }
 
 function updateScrollProgress() {
@@ -140,5 +163,6 @@ function onWindowResize() {
   camera.updateProjectionMatrix();
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
+  layoutBalls();
   updateScrollProgress();
 }
