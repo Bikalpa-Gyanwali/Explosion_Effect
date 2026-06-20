@@ -59,7 +59,7 @@ function init() {
   document.body.appendChild(renderer.domElement);
 
   createBall({ color: 0xff5533, rotationSpeed: 0.0055, xDirection: -1 });
-  createBall({ color: 0xff8a3d, rotationSpeed: -0.0045, xDirection: 1 });
+  createBall({ color: 0xff8a3d, rotationSpeed: -0.0046, xDirection: 1 });
 
   layoutBalls();
 
