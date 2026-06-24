@@ -26,7 +26,7 @@ const fragmentShader = `
   varying float vProgress;
 
   void main() {
-    vec3 lightDirection = normalize(vec3(0.4, 0.95, 0.6));
+    vec3 lightDirection = normalize(vec3(0.4, 0.9, 0.6));
     float light = 0.35 + max(dot(normalize(vNormal), lightDirection), 0.0) * 0.65;
     vec3 color = uBaseColor * light;
     float alpha = 1.0 - vProgress * 0.45;
